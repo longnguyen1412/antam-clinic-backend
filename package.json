@@ -1,0 +1,28 @@
+{
+  "name": "antam-clinic-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Antam Clinic System using ExpressJS and PostgreSQL multi-site architecture",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": [
+    "express",
+    "nodejs",
+    "postgresql",
+    "antam-clinic",
+    "distributed-database"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "helmet": "^8.0.0",
+    "morgan": "^1.10.0",
+    "pg": "^8.13.1"
+  }
+}
