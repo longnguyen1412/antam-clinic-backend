@@ -222,9 +222,11 @@ export async function getPatientMedicalRecord(req, res, next) {
     const dotsRes = await query(
       `SELECT td.madot, td.maphieukham, td.ngaybatdau, td.mabenh, td.tenbenh,
               td.mucdo, td.solanchuacanthiet, td.solandachua, td.ngayketthuc, td.trangthai,
-              nv.makhoa, k.tenkhoa, pk.mabs, nv.hoten AS tenbs
+              nv.makhoa, k.tenkhoa, k.macn, pk.mabs, nv.hoten AS tenbs,
+              b.maicd10
        FROM v_tien_trinh_dot td
        JOIN phieu_kham pk ON pk.maphieukham = td.maphieukham
+       JOIN benh b ON b.mabenh = td.mabenh
        JOIN nhan_vien nv ON nv.manv = pk.mabs
        JOIN khoa k ON k.makhoa = nv.makhoa
        WHERE pk.mabn = $1
@@ -234,25 +236,57 @@ export async function getPatientMedicalRecord(req, res, next) {
 
     // 3. Lịch sử các lần khám (PHIEU_KHAM)
     const pkRes = await query(
-      `SELECT pk.maphieukham, pk.thoigian, pk.lydokham, pk.trieuchung, pk.ketluankham,
-              pk.ngayhentaikham, pk.ghichu, pk.mabs, nv.hoten AS tenbs, nv.makhoa, k.tenkhoa,
-              cp.tongtien, hd.mahd, hd.trangthai AS trangthaihoadon
+      `SELECT pk.maphieukham AS maluot, pk.thoigian, 'KHAM' AS loailuot,
+              nv.makhoa, k.tenkhoa, k.macn, pk.mabs, nv.hoten AS tenbs,
+              pk.ngayhentaikham, pk.ghichu, pk.lydokham, pk.trieuchung, pk.ketluankham,
+              NULL::varchar AS macddt, NULL::int AS lanthu, NULL::text AS ketluansauchua, NULL::varchar AS tinhtrangsauchua,
+              (
+                SELECT string_agg(b.tenbenh, ', ' ORDER BY b.tenbenh)
+                FROM dot_dieu_tri d
+                JOIN benh b ON b.mabenh = d.mabenh
+                WHERE d.maphieukham = pk.maphieukham
+              ) AS benh,
+              NULL::text AS hinhthucchua,
+              (
+                SELECT string_agg(y.hoten, ', ' ORDER BY y.hoten)
+                FROM ho_tro_kham ht
+                JOIN nhan_vien y ON y.manv = ht.mayt
+                WHERE ht.maphieukham = pk.maphieukham
+              ) AS ytahotro,
+              COALESCE(cp.tiendichvu, 0) AS tiendichvu,
+              COALESCE(cp.tienthuoc, 0) AS tienthuoc,
+              COALESCE(cp.tienthietbi, 0) AS tienthietbi,
+              COALESCE(cp.tongtien, 0) AS tongtien
        FROM phieu_kham pk
        JOIN nhan_vien nv ON nv.manv = pk.mabs
        JOIN khoa k ON k.makhoa = nv.makhoa
        LEFT JOIN v_chi_phi_phieu cp ON cp.maphieu = pk.maphieukham
-       LEFT JOIN v_hoa_don hd ON hd.maphieukham = pk.maphieukham
-       WHERE pk.mabn = $1
-       ORDER BY pk.thoigian DESC`,
+       WHERE pk.mabn = $1`,
       [maBN]
     );
 
     // 4. Lịch sử các lần chữa (PHIEU_DIEU_TRI)
     const pdtRes = await query(
-      `SELECT pdt.maphieudt, pdt.thoigian, pdt.madot, pdt.lanthu, pdt.ketluansauchua,
-              pdt.tinhtrangsauchua, pdt.ngayhentaikham, pdt.ghichu, pdt.mabs, nv.hoten AS tenbs,
-              nv.makhoa, k.tenkhoa, b.tenbenh,
-              cp.tongtien, hd.mahd, hd.trangthai AS trangthaihoadon
+      `SELECT pdt.maphieudt AS maluot, pdt.thoigian, 'CHUA' AS loailuot,
+              nv.makhoa, k.tenkhoa, k.macn, pdt.mabs, nv.hoten AS tenbs,
+              pdt.ngayhentaikham, pdt.ghichu, NULL::varchar AS lydokham, NULL::text AS trieuchung, NULL::text AS ketluankham,
+              pdt.madot AS macddt, pdt.lanthu, pdt.ketluansauchua, pdt.tinhtrangsauchua,
+              b.tenbenh AS benh,
+              (
+                SELECT string_agg(hinhthuc, ', ' ORDER BY hinhthuc)
+                FROM pdt_hinh_thuc
+                WHERE maphieudt = pdt.maphieudt
+              ) AS hinhthucchua,
+              (
+                SELECT string_agg(y.hoten, ', ' ORDER BY y.hoten)
+                FROM ho_tro_chua ht
+                JOIN nhan_vien y ON y.manv = ht.mayt
+                WHERE ht.maphieudt = pdt.maphieudt
+              ) AS ytahotro,
+              COALESCE(cp.tiendichvu, 0) AS tiendichvu,
+              COALESCE(cp.tienthuoc, 0) AS tienthuoc,
+              COALESCE(cp.tienthietbi, 0) AS tienthietbi,
+              COALESCE(cp.tongtien, 0) AS tongtien
        FROM phieu_dieu_tri pdt
        JOIN dot_dieu_tri d ON d.madot = pdt.madot
        JOIN benh b ON b.mabenh = d.mabenh
@@ -260,11 +294,90 @@ export async function getPatientMedicalRecord(req, res, next) {
        JOIN nhan_vien nv ON nv.manv = pdt.mabs
        JOIN khoa k ON k.makhoa = nv.makhoa
        LEFT JOIN v_chi_phi_phieu cp ON cp.maphieu = pdt.maphieudt
-       LEFT JOIN v_hoa_don hd ON hd.maphieudt = pdt.maphieudt
-       WHERE pk.mabn = $1
-       ORDER BY pdt.thoigian DESC`,
+       WHERE pk.mabn = $1`,
       [maBN]
     );
+
+    // 5. Chi tiết chi phí của tất cả các lượt
+    const allMaLuot = [...pkRes.rows.map((r) => r.maluot), ...pdtRes.rows.map((r) => r.maluot)];
+    const chiPhiMap = {};
+    if (allMaLuot.length > 0) {
+      const cpRes = await query(
+        `SELECT maphieu, loaichiphi, mamathang, tenmathang, soluong, dongiaapdung, thanhtien
+         FROM v_chi_tiet_chi_phi_phieu
+         WHERE maphieu = ANY($1)
+         ORDER BY loaichiphi, mamathang`,
+        [allMaLuot]
+      );
+      cpRes.rows.forEach((c) => {
+        if (!chiPhiMap[c.maphieu]) chiPhiMap[c.maphieu] = [];
+        chiPhiMap[c.maphieu].push({
+          maLuot: c.maphieu,
+          loai: c.loaichiphi,
+          ma: c.mamathang,
+          ten: c.tenmathang,
+          ghiChu: null,
+          soLuong: c.soluong,
+          donGia: parseFloat(c.dongiaapdung),
+          thanhTien: parseFloat(c.thanhtien),
+        });
+      });
+    }
+
+    // 6. Gộp và sắp xếp các lượt khám/chữa theo thời gian giảm dần
+    const allRows = [...pkRes.rows, ...pdtRes.rows];
+    allRows.sort((a, b) => new Date(b.thoigian) - new Date(a.thoigian));
+
+    const luot = allRows.map((r) => ({
+      maLuot: r.maluot,
+      thoiGian: r.thoigian.toISOString(),
+      loaiLuot: r.loailuot,
+      maKhoa: r.makhoa,
+      tenKhoa: r.tenkhoa,
+      maCn: r.macn,
+      maBS: r.mabs,
+      tenBS: r.tenbs,
+      ngayHenTaiKham: r.ngayhentaikham ? r.ngayhentaikham.toISOString().split('T')[0] : null,
+      ghiChu: r.ghichu,
+      lyDoKham: r.lydokham,
+      trieuChung: r.trieuchung,
+      ketLuanKham: r.ketluankham,
+      maCDDT: r.macddt,
+      lanThu: r.lanthu,
+      ketLuanSauChua: r.ketluansauchua,
+      tinhTrangSauChua: r.tinhtrangsauchua,
+      benh: r.benh,
+      hinhThucChua: r.hinhthucchua,
+      yTaHoTro: r.ytahotro,
+      tienDichVu: parseFloat(r.tiendichvu),
+      tienThuoc: parseFloat(r.tienthuoc),
+      tienThietBi: parseFloat(r.tienthietbi),
+      tongTien: parseFloat(r.tongtien),
+      chiTiet: chiPhiMap[r.maluot] || [],
+    }));
+
+    const tongChiPhi = luot.reduce((sum, item) => sum + item.tongTien, 0);
+
+    const dotDieuTri = dotsRes.rows.map((d) => ({
+      maCDDT: d.madot,
+      maDot: d.madot,
+      maPhieuKham: d.maphieukham,
+      ngayBatDau: d.ngaybatdau ? d.ngaybatdau.toISOString().split('T')[0] : null,
+      maBenh: d.mabenh,
+      tenBenh: d.tenbenh,
+      maICD10: d.maicd10,
+      mucDo: d.mucdo,
+      soLanChuaCanThiet: d.solanchuacanthiet,
+      soLanDaChua: d.solandachua,
+      ngayKetThuc: d.ngayketthuc ? d.ngayketthuc.toISOString().split('T')[0] : null,
+      trangThai: d.trangthai,
+      maKhoa: d.makhoa,
+      tenKhoa: d.tenkhoa,
+      maCn: d.macn,
+      maBS: d.mabs,
+      tenBS: d.tenbs,
+      quaHan: d.trangthai === 'Đang điều trị' && d.ngaybatdau && (Date.now() - new Date(d.ngaybatdau).getTime()) > 30 * 86400000,
+    }));
 
     res.json({
       benhNhan: {
@@ -280,60 +393,9 @@ export async function getPatientMedicalRecord(req, res, next) {
         nhomMau: bn.nhommau,
         tienSuDiUng: bn.tiensudiung,
       },
-      dotDieuTri: dotsRes.rows.map((d) => ({
-        maCDDT: d.madot,
-        maDot: d.madot,
-        maPhieuKham: d.maphieukham,
-        ngayBatDau: d.ngaybatdau ? d.ngaybatdau.toISOString().split('T')[0] : null,
-        maBenh: d.mabenh,
-        tenBenh: d.tenbenh,
-        mucDo: d.mucdo,
-        soLanChuaCanThiet: d.solanchuacanthiet,
-        soLanDaChua: d.solandachua,
-        ngayKetThuc: d.ngayketthuc ? d.ngayketthuc.toISOString().split('T')[0] : null,
-        trangThai: d.trangthai,
-        maKhoa: d.makhoa,
-        tenKhoa: d.tenkhoa,
-        maBS: d.mabs,
-        tenBS: d.tenbs,
-      })),
-      phieuKham: pkRes.rows.map((k) => ({
-        maLuot: k.maphieukham,
-        thoiGian: k.thoigian.toISOString(),
-        loaiLuot: 'KHAM',
-        lyDoKham: k.lydokham,
-        trieuChung: k.trieuchung,
-        ketLuanKham: k.ketluankham,
-        ngayHenTaiKham: k.ngayhentaikham ? k.ngayhentaikham.toISOString().split('T')[0] : null,
-        ghiChu: k.ghichu,
-        maBS: k.mabs,
-        tenBS: k.tenbs,
-        maKhoa: k.makhoa,
-        tenKhoa: k.tenkhoa,
-        tongTien: parseFloat(k.tongtien || 0),
-        maHD: k.mahd,
-        trangThaiHoaDon: k.trangthaihoadon,
-      })),
-      phieuDieuTri: pdtRes.rows.map((c) => ({
-        maLuot: c.maphieudt,
-        thoiGian: c.thoigian.toISOString(),
-        loaiLuot: 'CHUA',
-        maCDDT: c.madot,
-        maDot: c.madot,
-        tenBenh: c.tenbenh,
-        lanThu: c.lanthu,
-        ketLuanSauChua: c.ketluansauchua,
-        tinhTrangSauChua: c.tinhtrangsauchua,
-        ngayHenTaiKham: c.ngayhentaikham ? c.ngayhentaikham.toISOString().split('T')[0] : null,
-        ghiChu: c.ghichu,
-        maBS: c.mabs,
-        tenBS: c.tenbs,
-        maKhoa: c.makhoa,
-        tenKhoa: c.tenkhoa,
-        tongTien: parseFloat(c.tongtien || 0),
-        maHD: c.mahd,
-        trangThaiHoaDon: c.trangthaihoadon,
-      })),
+      dotDieuTri,
+      luot,
+      tongChiPhi,
     });
   } catch (err) {
     next(err);
