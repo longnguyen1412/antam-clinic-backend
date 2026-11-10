@@ -132,7 +132,7 @@ export async function getInvoiceDetail(req, res, next) {
         hinhThuc: t.hinhthuc,
       })),
       chiTietChiPhi: cpRes.rows.map((c) => ({
-        loaiChiPhi: c.loaichiphi === 'DV' ? 'DICH_VU' : c.loaichiphi === 'TB' ? 'THIET_BI' : c.loaichiphi,
+        loaiChiPhi: c.loaichiphi,
         maMatHang: c.mamathang,
         tenMatHang: c.tenmathang,
         soLuong: c.soluong,

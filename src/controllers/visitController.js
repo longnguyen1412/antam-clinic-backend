@@ -455,15 +455,8 @@ export async function getVisitDetail(req, res, next) {
       dvRes.rows.forEach((d) => { dvKetQuaMap[d.madv] = d.ketqua; });
     }
 
-    const mapLoaiChiPhi = (raw) => {
-      if (raw === 'DV' || raw === 'DICH_VU') return 'DICH_VU';
-      if (raw === 'TB' || raw === 'THIET_BI') return 'THIET_BI';
-      if (raw === 'THUOC') return 'THUOC';
-      return raw || 'DICH_VU';
-    };
-
     chiPhi = cpRes.rows.map((c) => ({
-      loai: mapLoaiChiPhi(c.loaichiphi),
+      loai: c.loaichiphi,
       ma: c.mamathang,
       ten: c.tenmathang,
       soLuong: c.soluong,
