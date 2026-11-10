@@ -212,7 +212,7 @@ export async function createBacSi(req, res, next) {
       // 1. Insert NHAN_VIEN
       await client.query(
         `INSERT INTO nhan_vien (manv, hoten, ngaysinh, gioitinh, cccd, diachi, hesoluong, ngayvaolam, trangthai, loainv, makhoa)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Bác sĩ', $10)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'BS', $10)`,
         [finalMaNV, hoTen, ngaySinh || null, gioiTinh || 'Khác', cccd || null, diaChi || null,
          heSoLuong || 2.34, ngayVaoLam || new Date(), trangThai || 'Đang làm việc', maKhoa]
       );
@@ -313,9 +313,9 @@ export async function deleteBacSi(req, res, next) {
     );
 
     if (parseInt(checkRes.rows[0].count, 10) > 0) {
-      // Soft delete: set status to 'Ngừng làm việc'
-      await query("UPDATE nhan_vien SET trangthai = 'Ngừng làm việc' WHERE manv = $1", [maNV]);
-      return res.json({ mode: 'SOFT', message: 'Bác sĩ đã phát sinh phiếu khám/chữa. Đã chuyển trạng thái sang "Ngừng làm việc".' });
+      // Soft delete: set status to 'Ngừng hoạt động'
+      await query("UPDATE nhan_vien SET trangthai = 'Ngừng hoạt động' WHERE manv = $1", [maNV]);
+      return res.json({ mode: 'SOFT', message: 'Bác sĩ đã phát sinh phiếu khám/chữa. Đã chuyển trạng thái sang "Ngừng hoạt động".' });
     }
 
     // Hard delete
@@ -417,7 +417,7 @@ export async function createYTa(req, res, next) {
 
       await client.query(
         `INSERT INTO nhan_vien (manv, hoten, ngaysinh, gioitinh, cccd, diachi, hesoluong, ngayvaolam, trangthai, loainv, makhoa)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Y tá', $10)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'YT', $10)`,
         [finalMaNV, hoTen, ngaySinh || null, gioiTinh || 'Khác', cccd || null, diaChi || null,
          heSoLuong || 1.86, ngayVaoLam || new Date(), trangThai || 'Đang làm việc', maKhoa]
       );
@@ -513,8 +513,8 @@ export async function deleteYTa(req, res, next) {
     );
 
     if (parseInt(checkRes.rows[0].count, 10) > 0) {
-      await query("UPDATE nhan_vien SET trangthai = 'Ngừng làm việc' WHERE manv = $1", [maNV]);
-      return res.json({ mode: 'SOFT', message: 'Y tá đã phát sinh hỗ trợ khám/chữa. Đã chuyển trạng thái sang "Ngừng làm việc".' });
+      await query("UPDATE nhan_vien SET trangthai = 'Ngừng hoạt động' WHERE manv = $1", [maNV]);
+      return res.json({ mode: 'SOFT', message: 'Y tá đã phát sinh hỗ trợ khám/chữa. Đã chuyển trạng thái sang "Ngừng hoạt động".' });
     }
 
     await withTransaction(async (client) => {
@@ -794,7 +794,7 @@ export async function getDichVu(req, res, next) {
   try {
     const { q } = req.query;
     let sql = `
-      SELECT dv.madv, dv.tendv, dv.loaidv, dv.dongia, dv.mota,
+      SELECT dv.madv, dv.tendv, dv.loaidv, dv.donvitinh, dv.dongia,
              (
                SELECT COUNT(*)::int FROM (
                  SELECT madv FROM dv_kham WHERE madv = dv.madv
@@ -817,8 +817,8 @@ export async function getDichVu(req, res, next) {
       maDV: r.madv,
       tenDV: r.tendv,
       loaiDV: r.loaidv,
+      donViTinh: r.donvitinh,
       donGia: parseFloat(r.dongia),
-      moTa: r.mota,
       soLanSuDung: r.solansudung,
     }));
     res.json(data);
@@ -829,17 +829,17 @@ export async function getDichVu(req, res, next) {
 
 export async function createDichVu(req, res, next) {
   try {
-    const { maDV, tenDV, loaiDV, donGia, moTa } = req.body;
+    const { maDV, tenDV, loaiDV, donViTinh, donGia } = req.body;
     let finalMa = maDV;
     if (!finalMa) {
       const cRes = await query("SELECT COUNT(*)::int AS count FROM dich_vu");
       finalMa = `DV${String(cRes.rows[0].count + 1).padStart(2, '0')}`;
     }
     await query(
-      `INSERT INTO dich_vu (madv, tendv, loaidv, dongia, mota) VALUES ($1, $2, $3, $4, $5)`,
-      [finalMa, tenDV, loaiDV || 'Khám bệnh', donGia || 0, moTa || null]
+      `INSERT INTO dich_vu (madv, tendv, loaidv, donvitinh, dongia) VALUES ($1, $2, $3, $4, $5)`,
+      [finalMa, tenDV, loaiDV || 'Khám bệnh', donViTinh || 'Lần', donGia || 0]
     );
-    res.json({ maDV: finalMa, tenDV, loaiDV, donGia, moTa, soLanSuDung: 0 });
+    res.json({ maDV: finalMa, tenDV, loaiDV, donViTinh, donGia, soLanSuDung: 0 });
   } catch (err) {
     next(err);
   }
@@ -848,17 +848,17 @@ export async function createDichVu(req, res, next) {
 export async function updateDichVu(req, res, next) {
   try {
     const { ma } = req.params;
-    const { tenDV, loaiDV, donGia, moTa } = req.body;
+    const { tenDV, loaiDV, donViTinh, donGia } = req.body;
     await query(
       `UPDATE dich_vu 
        SET tendv = COALESCE($1, tendv),
            loaidv = COALESCE($2, loaidv),
-           dongia = COALESCE($3, dongia),
-           mota = COALESCE($4, mota)
+           donvitinh = COALESCE($3, donvitinh),
+           dongia = COALESCE($4, dongia)
        WHERE madv = $5`,
-      [tenDV, loaiDV, donGia, moTa, ma]
+      [tenDV, loaiDV, donViTinh, donGia, ma]
     );
-    res.json({ maDV: ma, tenDV, loaiDV, donGia, moTa });
+    res.json({ maDV: ma, tenDV, loaiDV, donViTinh, donGia });
   } catch (err) {
     next(err);
   }
