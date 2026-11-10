@@ -1,15 +1,15 @@
-import { checkConnections } from '../config/database.js';
+import { checkConnection } from '../config/database.js';
 
 export async function getHealth(req, res, next) {
   try {
-    const dbStatus = await checkConnections();
-    const allUp = Object.values(dbStatus).every((s) => s.status === 'UP');
+    const dbStatus = await checkConnection();
+    const isUp = dbStatus.status === 'UP';
 
-    res.status(allUp ? 200 : 503).json({
-      status: allUp ? 'UP' : 'DEGRADED',
+    res.status(isUp ? 200 : 503).json({
+      status: isUp ? 'UP' : 'DOWN',
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
-      databases: dbStatus,
+      database: dbStatus,
     });
   } catch (err) {
     next(err);

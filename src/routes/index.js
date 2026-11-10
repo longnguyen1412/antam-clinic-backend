@@ -5,10 +5,11 @@ import { siteContext } from '../middlewares/siteContext.js';
 
 const router = Router();
 
-// Health check doesn't need site context
-router.use('/health', healthRoutes);
+// Apply site context middleware to all /api endpoints
+router.use(siteContext);
 
-// Business & master routes with site context
-router.use('/master', siteContext, masterDataRoutes);
+// Route modules
+router.use('/health', healthRoutes);
+router.use('/master', masterDataRoutes);
 
 export default router;

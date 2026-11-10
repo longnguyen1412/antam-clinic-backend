@@ -5,3 +5,4 @@ export function notFound(req, res) {
     message: `Không tìm thấy tài nguyên: ${req.method} ${req.originalUrl}`,
   });
 }
+

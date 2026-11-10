@@ -8,3 +8,4 @@ router.get('/thuoc', getMedicines);
 router.get('/dich-vu', getServices);
 
 export default router;
+

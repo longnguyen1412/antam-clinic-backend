@@ -1,9 +1,11 @@
+import { env } from '../config/env.js';
+
 /**
  * Centralized error handling middleware.
  * Maps PostgreSQL error codes to friendly JSON responses.
  */
 export function errorHandler(err, req, res, next) {
-  const site = req.site || null;
+  const site = req.site || env.siteCode;
 
   // PostgreSQL Error Codes mapping
   if (err.code) {

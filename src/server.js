@@ -1,13 +1,14 @@
 import app from './app.js';
 import { env } from './config/env.js';
-import { closeAllPools } from './config/database.js';
+import { closePool } from './config/database.js';
 
 const server = app.listen(env.port, () => {
   console.log(`===============================================`);
   console.log(` Antam Clinic Backend (ExpressJS) started!`);
+  console.log(` Site: ${env.siteCode} - ${env.siteName}`);
+  console.log(` Database: ${env.db.host}:${env.db.port}/${env.db.database}`);
   console.log(` Port: ${env.port}`);
   console.log(` Mode: ${env.nodeEnv}`);
-  console.log(` Default Site: ${env.defaultSite}`);
   console.log(` Health check: http://localhost:${env.port}/api/health`);
   console.log(` Master branches: http://localhost:${env.port}/api/master/chi-nhanh`);
   console.log(`===============================================`);
@@ -18,8 +19,8 @@ async function shutdown(signal) {
   server.close(async () => {
     console.log('HTTP server closed.');
     try {
-      await closeAllPools();
-      console.log('All PostgreSQL connection pools closed.');
+      await closePool();
+      console.log('PostgreSQL connection pool closed.');
       process.exit(0);
     } catch (err) {
       console.error('Error during shutdown:', err);

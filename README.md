@@ -1,22 +1,26 @@
 # Antam Clinic Backend (Express.js)
 
-Dự án Backend nền tảng cho Hệ thống Quản trị Phòng khám Đa chi nhánh An Tâm (Antam Clinic System).  
-Xây dựng trên nền tảng **Node.js (ES Modules)** và **Express.js**, tích hợp kết nối phân tán đa cơ sở dữ liệu **PostgreSQL** (S0: Trung tâm, S1..S3: Chi nhánh).
+Dự án Backend cho Hệ thống Quản trị Phòng khám Đa chi nhánh An Tâm (Antam Clinic System).  
+Xây dựng trên nền tảng **Node.js (ES Modules)** và **Express.js**, tuân thủ nguyên lý kiến trúc phân tán: **Mỗi Backend instance kết nối độc lập tới duy nhất 1 Database tương ứng (1 BE <---> 1 DB)**.
 
 ---
 
-## 1. Yêu cầu môi trường
+## 1. Kiến trúc phân tán 1 BE <---> 1 DB
 
-- **Node.js**: >= 20.x (Khuyến nghị 22+)
-- **PostgreSQL**: Cụm Docker multi-site chạy ở các port:
-  - S0 (Hub): `5430` (`ql_phongkham_hub`)
-  - S1 (Cầu Giấy): `5431` (`ql_phongkham_cn1`)
-  - S2 (Đống Đa): `5432` (`ql_phongkham_cn2`)
-  - S3 (Ba Đình): `5433` (`ql_phongkham_cn3`)
+Mỗi cơ sở (Node) trong mạng lưới bao gồm một cụm dịch vụ tự chủ:
+* **Chi nhánh S1 (Cầu Giấy)**: `Backend S1` <---> `Database S1 (ql_phongkham_cn1:5431)`
+* **Chi nhánh S2 (Đống Đa)**: `Backend S2` <---> `Database S2 (ql_phongkham_cn2:5432)`
+* **Chi nhánh S3 (Ba Đình)**: `Backend S3` <---> `Database S3 (ql_phongkham_cn3:5433)`
+* **Trung tâm S0 (Hub)**: `Backend S0` <---> `Database S0 (ql_phongkham_hub:5430)`
+
+> [!NOTE]
+> Backend của chi nhánh nào chỉ kết nối và đọc/ghi trên CSDL của chi nhánh đó.  
+> - Dữ liệu danh mục chung (Master Data) được CSDL tự động đồng bộ từ Trung tâm S0 về các chi nhánh qua **Logical Replication**.  
+> - Báo cáo toàn chuỗi tại Trung tâm S0 truy vấn qua **Foreign Data Wrapper (FDW)** và Global Views ở tầng CSDL.
 
 ---
 
-## 2. Cài đặt và khởi chạy
+## 2. Cài đặt và cấu hình
 
 ### Cài đặt dependencies:
 ```bash
@@ -29,7 +33,29 @@ Tạo file `.env` từ `.env.example`:
 cp .env.example .env
 ```
 
-### Chạy ứng dụng:
+Ví dụ cấu hình cho Backend cơ sở **S1**:
+```env
+PORT=8080
+NODE_ENV=development
+
+# Thông tin cơ sở
+SITE_CODE=S1
+SITE_NAME=Chi nhánh Cầu Giấy
+
+# CSDL cục bộ tương ứng
+DB_HOST=localhost
+DB_PORT=5431
+DB_NAME=ql_phongkham_cn1
+DB_USER=admin
+DB_PASS=password123
+```
+
+Khi triển khai cho cơ sở khác (ví dụ S2), chỉ cần đổi `SITE_CODE=S2`, `DB_PORT=5432`, `DB_NAME=ql_phongkham_cn2`.
+
+---
+
+## 3. Khởi chạy ứng dụng
+
 - **Chế độ phát triển (Watch mode - Node 22+)**:
   ```bash
   npm run dev
@@ -41,36 +67,41 @@ cp .env.example .env
 
 ---
 
-## 3. Kiến trúc Đa cơ sở (Multi-site)
-
-Hệ thống hỗ trợ định tuyến truy vấn đến đúng cơ sở thông qua:
-1. **Header HTTP**: `X-Site: S1` (hoặc `S0`, `S2`, `S3`)
-2. **Query Parameter**: `?site=S1`
-3. **Mặc định**: Lấy từ biến môi trường `DEFAULT_SITE` (mặc định là `S1`).
-
-Middleware `siteContext` sẽ tự động gắn kết nối cơ sở dữ liệu tương ứng vào `req.db` và mã chi nhánh vào `req.site`.
-
----
-
 ## 4. Các Endpoint mẫu sẵn có
 
-- **Kiểm tra trạng thái kết nối 4 cơ sở CSDL**:
+- **Kiểm tra trạng thái kết nối CSDL cục bộ**:
   ```http
   GET /api/health
   ```
-- **Lấy danh sách chi nhánh (Master Data từ Hub S0)**:
+  Response mẫu:
+  ```json
+  {
+    "status": "UP",
+    "timestamp": "2026-11-10T04:55:00.000Z",
+    "uptime": 12.34,
+    "database": {
+      "status": "UP",
+      "site": "S1",
+      "siteName": "Chi nhánh Cầu Giấy",
+      "database": "ql_phongkham_cn1",
+      "user": "admin"
+    }
+  }
+  ```
+
+- **Lấy danh mục chi nhánh**:
   ```http
   GET /api/master/chi-nhanh
   ```
-- **Lấy danh mục thuốc (theo site hiện tại)**:
+
+- **Lấy danh mục thuốc**:
   ```http
   GET /api/master/thuoc
-  Header: X-Site: S1
   ```
-- **Lấy danh mục dịch vụ (theo site hiện tại)**:
+
+- **Lấy danh mục dịch vụ**:
   ```http
   GET /api/master/dich-vu
-  Header: X-Site: S2
   ```
 
 ---
@@ -82,9 +113,9 @@ backend/
 ├── public/                 # Chứa bundle build của Frontend (SPA)
 ├── src/
 │   ├── config/
-│   │   ├── database.js     # Pool kết nối 4 cơ sở dữ liệu (S0, S1, S2, S3)
+│   │   ├── database.js     # Pool kết nối CSDL cục bộ (1 BE <-> 1 DB)
 │   │   └── env.js          # Load và validate biến môi trường
-│   ├── controllers/        # Xử lý logic tầng Controller
+│   ├── controllers/        # Tầng Controller xử lý request
 │   ├── middlewares/        # Middlewares (siteContext, errorHandler, notFound)
 │   ├── routes/             # Định nghĩa API routes
 │   ├── services/           # Nghiệp vụ business logic
