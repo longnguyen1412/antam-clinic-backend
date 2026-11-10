@@ -13,3 +13,4 @@ router.get('/luong', getBangLuong);
 router.get('/doanh-thu', getDoanhThu);
 
 export default router;
+

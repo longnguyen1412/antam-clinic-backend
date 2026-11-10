@@ -20,3 +20,4 @@ router.put('/:maBN', updatePatient);
 router.delete('/:maBN', deletePatient);
 
 export default router;
+

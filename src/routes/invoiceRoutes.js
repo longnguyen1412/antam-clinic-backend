@@ -8,3 +8,4 @@ router.get('/:maHD', getInvoiceDetail);
 router.post('/:maHD/thanh-toan', createPayment);
 
 export default router;
+

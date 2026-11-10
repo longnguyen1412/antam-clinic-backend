@@ -7,3 +7,4 @@ router.get('/mode', getAppMode);
 router.get('/sites', getSiteStatus);
 
 export default router;
+

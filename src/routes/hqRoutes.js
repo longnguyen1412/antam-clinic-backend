@@ -24,3 +24,4 @@ router.get('/doanh-thu', getDoanhThuToanChuoi);
 router.get('/thong-ke-benh', getThongKeBenhToanChuoi);
 
 export default router;
+

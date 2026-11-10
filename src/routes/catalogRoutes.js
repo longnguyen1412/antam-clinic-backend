@@ -71,3 +71,4 @@ router.put('/master/luong-co-so/:ngayApDung', updateLuongCoSo);
 router.delete('/master/luong-co-so/:ngayApDung', deleteLuongCoSo);
 
 export default router;
+

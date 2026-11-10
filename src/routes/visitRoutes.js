@@ -31,3 +31,4 @@ router.put('/luot-chua/:maLuot', updateLuotChua);
 router.put('/dot-dieu-tri/:maCDDT/ngung', stopTreatmentDot);
 
 export default router;
+

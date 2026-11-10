@@ -384,3 +384,4 @@ export async function getActiveTreatmentDots(req, res, next) {
     next(err);
   }
 }
+
