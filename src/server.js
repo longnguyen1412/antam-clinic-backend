@@ -14,6 +14,18 @@ const server = app.listen(env.port, () => {
   console.log(`===============================================`);
 });
 
+server.on('error', (err) => {
+  console.error('HTTP server error:', err);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 async function shutdown(signal) {
   console.log(`\nReceived ${signal}. Shutting down gracefully...`);
   server.close(async () => {
