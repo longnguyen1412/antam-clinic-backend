@@ -35,7 +35,7 @@ cp .env.example .env
 
 Ví dụ cấu hình cho Backend cơ sở **S1**:
 ```env
-PORT=8080
+PORT=8082
 NODE_ENV=development
 
 # Thông tin cơ sở

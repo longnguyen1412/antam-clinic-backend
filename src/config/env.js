@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export const env = {
-  port: parseInt(process.env.PORT || '8080', 10),
+  port: parseInt(process.env.PORT || '8082', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   siteCode: (process.env.SITE_CODE || 'S1').toUpperCase(),
   siteName: process.env.SITE_NAME || 'Chi nhánh Cầu Giấy',
