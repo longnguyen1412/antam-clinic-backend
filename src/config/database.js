@@ -10,13 +10,45 @@ pool.on('error', (err) => {
 });
 
 /**
- * Execute a query against the local database
+ * Execute a single query against the local database
  * @param {string} text SQL query
  * @param {Array<any>} params Parameters
  * @returns {Promise<pg.QueryResult>}
  */
 export async function query(text, params = []) {
   return pool.query(text, params);
+}
+
+/**
+ * Get a dedicated client from the pool (must release after use)
+ */
+export async function getClient() {
+  return pool.connect();
+}
+
+/**
+ * Execute operations within a database transaction
+ * @template T
+ * @param {(client: pg.PoolClient) => Promise<T>} callback
+ * @returns {Promise<T>}
+ */
+export async function withTransaction(callback) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const result = await callback(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rbErr) {
+      console.error('Error during transaction rollback:', rbErr.message);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 /**
