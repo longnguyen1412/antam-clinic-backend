@@ -1,4 +1,5 @@
 import { query, withTransaction } from '../config/database.js';
+import { syncInvoiceToMongo } from '../services/invoiceSyncService.js';
 
 // ==========================================
 // 1. DANH SÁCH HÓA ĐƠN (GET /api/hoa-don)
@@ -198,6 +199,9 @@ export async function createPayment(req, res, next) {
       );
       return afterRes.rows[0];
     });
+
+    // Asynchronously update MongoDB replica via Kafka
+    syncInvoiceToMongo(maHD);
 
     res.json({
       maHD: result.mahd,

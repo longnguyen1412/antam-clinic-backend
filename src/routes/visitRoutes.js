@@ -9,11 +9,13 @@ import {
   updateLuotChua,
   stopTreatmentDot,
   deleteVisit,
+  getPhieuKhamGoc,
 } from '../controllers/visitController.js';
 
 const router = Router();
 
 // Lượt chung
+router.get('/phieu-kham-goc', getPhieuKhamGoc);
 router.get('/luot', getVisits);
 router.get('/luot/:maLuot', getVisitDetail);
 router.delete('/luot/:maLuot', deleteVisit);

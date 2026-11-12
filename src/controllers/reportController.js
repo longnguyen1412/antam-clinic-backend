@@ -334,6 +334,7 @@ export async function getTongQuan(req, res, next) {
           pk.lydokham,
           pk.trieuchung,
           pk.ketluankham,
+          pk.maphieugoc,
           NULL::varchar AS macddt,
           NULL::int AS lanthu,
           NULL::text AS ketluansauchua,
@@ -360,6 +361,7 @@ export async function getTongQuan(req, res, next) {
         JOIN nhan_vien nv ON nv.manv = pk.mabs
         JOIN khoa k ON k.makhoa = nv.makhoa
         LEFT JOIN v_chi_phi_phieu cp ON cp.maphieu = pk.maphieukham
+        WHERE pk.maphieugoc IS NULL
 
         UNION ALL
 
@@ -378,6 +380,7 @@ export async function getTongQuan(req, res, next) {
           NULL::text AS lydokham,
           NULL::text AS trieuchung,
           NULL::text AS ketluankham,
+          NULL::varchar AS maphieugoc,
           pdt.madot AS macddt,
           pdt.lanthu,
           pdt.ketluansauchua,
@@ -427,6 +430,7 @@ export async function getTongQuan(req, res, next) {
       lyDoKham: r.lydokham,
       trieuChung: r.trieuchung,
       ketLuanKham: r.ketluankham,
+      maPhieuGoc: r.maphieugoc || null,
       maCDDT: r.macddt,
       lanThu: r.lanthu,
       ketLuanSauChua: r.ketluansauchua,

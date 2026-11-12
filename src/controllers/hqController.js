@@ -227,49 +227,162 @@ export async function getDoanhThuToanChuoi(req, res, next) {
     const today = new Date().toISOString().split('T')[0];
     const fromDate = tu || `${today.slice(0, 7)}-01`;
     const toDate = den || today;
+    const tuTimestamp = `${fromDate} 00:00:00`;
+    const denTimestamp = `${toDate} 23:59:59`;
 
-    const result = await query(
-      `SELECT k.macn, cn.tencn, COUNT(DISTINCT cp.maphieu)::int AS soluot,
-              COALESCE(SUM(cp.tiendichvu), 0) AS tiendichvu,
-              COALESCE(SUM(cp.tienthuoc), 0) AS tienthuoc,
-              COALESCE(SUM(cp.tienthietbi), 0) AS tienthietbi,
-              COALESCE(SUM(cp.tongtien), 0) AS tongdoanhthu
-       FROM v_chi_phi_phieu cp
-       JOIN nhan_vien nv ON nv.manv = cp.mabs
-       JOIN khoa k ON k.makhoa = nv.makhoa
-       JOIN chi_nhanh cn ON cn.macn = k.macn
-       WHERE cp.thoigian::date >= $1 AND cp.thoigian::date <= $2
-       GROUP BY k.macn, cn.tencn
-       ORDER BY k.macn`,
-      [fromDate, toDate]
-    );
+    // 1. Danh sách chi nhánh
+    const cnRes = await query(`SELECT macn, tencn FROM chi_nhanh ORDER BY macn`);
+    const branches = cnRes.rows;
 
-    const theoChiNhanh = result.rows.map((r) => ({
+    // 2. Doanh thu phân bổ theo chi nhánh và theo từng tháng
+    const thangCnSql = `
+      SELECT k.macn, cn.tencn, TO_CHAR(cp.thoigian, 'YYYY-MM') AS thang,
+             COUNT(DISTINCT cp.maphieu)::int AS soluot,
+             COALESCE(SUM(CASE WHEN dv.loaidv IN ('Khám bệnh', 'Khám') THEN ct.thanhtien ELSE 0 END), 0)::float AS tienkham,
+             COALESCE(SUM(CASE WHEN ct.loaichiphi = 'DV' AND (dv.loaidv NOT IN ('Khám bệnh', 'Khám') OR dv.loaidv IS NULL) THEN ct.thanhtien ELSE 0 END), 0)::float AS tiendichvu,
+             COALESCE(SUM(CASE WHEN ct.loaichiphi = 'THUOC' THEN ct.thanhtien ELSE 0 END), 0)::float AS tienthuoc,
+             COALESCE(SUM(CASE WHEN ct.loaichiphi = 'TB' THEN ct.thanhtien ELSE 0 END), 0)::float AS tienthietbi,
+             COALESCE(SUM(ct.thanhtien), 0)::float AS tong
+      FROM v_chi_phi_phieu cp
+      JOIN nhan_vien nv ON nv.manv = cp.mabs
+      JOIN khoa k ON k.makhoa = nv.makhoa
+      JOIN chi_nhanh cn ON cn.macn = k.macn
+      LEFT JOIN v_chi_tiet_chi_phi_phieu ct ON ct.maphieu = cp.maphieu
+      LEFT JOIN dich_vu dv ON dv.madv = ct.mamathang AND ct.loaichiphi = 'DV'
+      WHERE cp.thoigian >= $1::timestamp AND cp.thoigian <= $2::timestamp
+      GROUP BY k.macn, cn.tencn, TO_CHAR(cp.thoigian, 'YYYY-MM')
+      ORDER BY thang, k.macn
+    `;
+    const thangCnRes = await query(thangCnSql, [tuTimestamp, denTimestamp]);
+
+    // 3. Chi tiết dịch vụ / thuốc / thiết bị
+    const chiTietSql = `
+      SELECT 
+        CASE 
+          WHEN ct.loaichiphi = 'DV' THEN 'DICH_VU'
+          WHEN ct.loaichiphi = 'THUOC' THEN 'THUOC'
+          ELSE 'THIET_BI'
+        END AS loai,
+        ct.mamathang AS ma,
+        ct.tenmathang AS ten,
+        COALESCE(dv.loaidv, tb.loaitb, NULL) AS nhom,
+        SUM(ct.soluong)::int AS soluong,
+        SUM(ct.thanhtien)::float AS sotien
+      FROM v_chi_tiet_chi_phi_phieu ct
+      JOIN v_chi_phi_phieu cp ON cp.maphieu = ct.maphieu
+      LEFT JOIN dich_vu dv ON dv.madv = ct.mamathang AND ct.loaichiphi = 'DV'
+      LEFT JOIN thiet_bi tb ON tb.matb = ct.mamathang AND ct.loaichiphi = 'TB'
+      WHERE cp.thoigian >= $1::timestamp AND cp.thoigian <= $2::timestamp
+      GROUP BY ct.loaichiphi, ct.mamathang, ct.tenmathang, dv.loaidv, tb.loaitb
+      ORDER BY sotien DESC, ten
+    `;
+    const chiTietRes = await query(chiTietSql, [tuTimestamp, denTimestamp]);
+
+    const theoThangChiNhanh = thangCnRes.rows.map((r) => ({
       maCn: r.macn,
-      tenCn: r.tencn,
+      thang: r.thang,
       soLuot: r.soluot,
-      tienDichVu: parseFloat(r.tiendichvu),
-      tienThuoc: parseFloat(r.tienthuoc),
-      tienThietBi: parseFloat(r.tienthietbi),
-      tongDoanhThu: parseFloat(r.tongdoanhthu),
+      tienKham: r.tienkham,
+      tienDichVu: r.tiendichvu,
+      tienThuoc: r.tienthuoc,
+      tienThietBi: r.tienthietbi,
+      tong: r.tong,
     }));
 
-    const tong = theoChiNhanh.reduce(
-      (acc, c) => ({
-        soLuot: acc.soLuot + c.soLuot,
-        tienDichVu: acc.tienDichVu + c.tienDichVu,
-        tienThuoc: acc.tienThuoc + c.tienThuoc,
-        tienThietBi: acc.tienThietBi + c.tienThietBi,
-        tongDoanhThu: acc.tongDoanhThu + c.tongDoanhThu,
-      }),
-      { soLuot: 0, tienDichVu: 0, tienThuoc: 0, tienThietBi: 0, tongDoanhThu: 0 }
-    );
+    // Khởi tạo map cho các chi nhánh
+    const cnMap = new Map();
+    for (const b of branches) {
+      cnMap.set(b.macn, {
+        maCn: b.macn,
+        tenCn: b.tencn,
+        soLuot: 0,
+        tienKham: 0,
+        tienDichVu: 0,
+        tienThuoc: 0,
+        tienThietBi: 0,
+        tong: 0,
+        tyTrong: 0,
+      });
+    }
+
+    for (const r of thangCnRes.rows) {
+      const item = cnMap.get(r.macn);
+      if (item) {
+        item.soLuot += r.soluot;
+        item.tienKham += r.tienkham;
+        item.tienDichVu += r.tiendichvu;
+        item.tienThuoc += r.tienthuoc;
+        item.tienThietBi += r.tienthietbi;
+        item.tong += r.tong;
+      }
+    }
+
+    // Nhóm theo tháng toàn chuỗi
+    const thangMap = new Map();
+    for (const r of thangCnRes.rows) {
+      if (!thangMap.has(r.thang)) {
+        thangMap.set(r.thang, {
+          thang: r.thang,
+          soLuot: 0,
+          tienKham: 0,
+          tienDichVu: 0,
+          tienThuoc: 0,
+          tienThietBi: 0,
+          tong: 0,
+        });
+      }
+      const t = thangMap.get(r.thang);
+      t.soLuot += r.soluot;
+      t.tienKham += r.tienkham;
+      t.tienDichVu += r.tiendichvu;
+      t.tienThuoc += r.tienthuoc;
+      t.tienThietBi += r.tienthietbi;
+      t.tong += r.tong;
+    }
+
+    const theoThang = Array.from(thangMap.values()).sort((a, b) => a.thang.localeCompare(b.thang));
+
+    const soLuot = theoThang.reduce((s, t) => s + t.soLuot, 0);
+    const tienKham = theoThang.reduce((s, t) => s + t.tienKham, 0);
+    const tienDichVu = theoThang.reduce((s, t) => s + t.tienDichVu, 0);
+    const tienThuoc = theoThang.reduce((s, t) => s + t.tienThuoc, 0);
+    const tienThietBi = theoThang.reduce((s, t) => s + t.tienThietBi, 0);
+    const tongDoanhThu = theoThang.reduce((s, t) => s + t.tong, 0);
+
+    // Tính tỷ trọng % cho từng chi nhánh
+    const chiNhanh = Array.from(cnMap.values()).map((c) => ({
+      ...c,
+      tyTrong: tongDoanhThu > 0 ? Math.round((c.tong / tongDoanhThu) * 1000) / 10 : 0,
+    }));
+
+    const tongHop = {
+      tu: fromDate,
+      den: toDate,
+      soLuot,
+      tienKham,
+      tienDichVu,
+      tienThuoc,
+      tienThietBi,
+      tongDoanhThu,
+      theoThang,
+      chiTiet: chiTietRes.rows.map((r) => ({
+        loai: r.loai,
+        ma: r.ma,
+        ten: r.ten,
+        nhom: r.nhom,
+        soLuong: r.soluong,
+        soTien: r.sotien,
+      })),
+    };
 
     res.json({
+      tongHop,
+      chiNhanh,
+      theoThangChiNhanh,
       tuNgay: fromDate,
       denNgay: toDate,
-      tongCong: tong,
-      theoChiNhanh,
+      tongCong: tongHop,
+      theoChiNhanh: chiNhanh,
     });
   } catch (err) {
     next(err);
@@ -281,32 +394,86 @@ export async function getThongKeBenhToanChuoi(req, res, next) {
     const { thang } = req.query;
     const targetMonth = thang || new Date().toISOString().slice(0, 7);
 
+    // 1. Lấy danh sách mã chi nhánh dùng chung từ danh mục
+    const cnRes = await query('SELECT macn FROM chi_nhanh ORDER BY macn');
+    const chiNhanh = cnRes.rows.map((r) => r.macn);
+
+    // 2. Truy vấn các đợt điều trị có lượt khám hoặc chữa trong tháng trên toàn chuỗi (qua Global Views)
     const sql = `
-      SELECT b.mabenh, b.tenbenh, b.maicd10, COUNT(DISTINCT d.madot)::int AS solanmac
-      FROM dot_dieu_tri d
-      JOIN benh b ON b.mabenh = d.mabenh
-      JOIN phieu_kham pk ON pk.maphieukham = d.maphieukham
-      WHERE TO_CHAR(pk.thoigian, 'YYYY-MM') = $1
-         OR EXISTS (
-           SELECT 1 FROM phieu_dieu_tri pdt 
-           WHERE pdt.madot = d.madot AND TO_CHAR(pdt.thoigian, 'YYYY-MM') = $1
-         )
-      GROUP BY b.mabenh, b.tenbenh, b.maicd10
-      ORDER BY solanmac DESC, b.mabenh ASC
+      WITH luot_trong_thang AS (
+        SELECT maphieukham AS maphieu, sitenguon FROM phieu_kham WHERE TO_CHAR(thoigian, 'YYYY-MM') = $1
+        UNION
+        SELECT maphieudt AS maphieu, sitenguon FROM phieu_dieu_tri WHERE TO_CHAR(thoigian, 'YYYY-MM') = $1
+      ),
+      dot_trong_thang AS (
+        SELECT DISTINCT d.madot, d.mabenh, pk.mabn, d.sitenguon
+        FROM dot_dieu_tri d
+        JOIN phieu_kham pk ON pk.maphieukham = d.maphieukham AND pk.sitenguon = d.sitenguon
+        LEFT JOIN phieu_dieu_tri pdt ON pdt.madot = d.madot AND pdt.sitenguon = d.sitenguon
+        WHERE (d.maphieukham, d.sitenguon) IN (SELECT maphieu, sitenguon FROM luot_trong_thang)
+           OR (pdt.maphieudt, pdt.sitenguon) IN (SELECT maphieu, sitenguon FROM luot_trong_thang)
+      )
+      SELECT b.mabenh, b.tenbenh, b.maicd10, dt.sitenguon, dt.mabn, dt.madot
+      FROM dot_trong_thang dt
+      JOIN benh b ON b.mabenh = dt.mabenh
     `;
 
     const result = await query(sql, [targetMonth]);
-    const tongSoLuot = result.rows.reduce((sum, r) => sum + r.solanmac, 0);
+
+    const tongTheoChiNhanh = {};
+    for (const cn of chiNhanh) {
+      tongTheoChiNhanh[cn] = 0;
+    }
+
+    const benhMap = new Map();
+
+    for (const r of result.rows) {
+      const maBenh = r.mabenh;
+      if (!benhMap.has(maBenh)) {
+        const theoCn = {};
+        for (const cn of chiNhanh) theoCn[cn] = 0;
+        benhMap.set(maBenh, {
+          maBenh: r.mabenh,
+          tenBenh: r.tenbenh,
+          maICD10: r.maicd10,
+          soLanMac: 0,
+          patients: new Set(),
+          theoChiNhanh: theoCn,
+        });
+      }
+
+      const item = benhMap.get(maBenh);
+      item.soLanMac += 1;
+      item.patients.add(r.mabn);
+
+      const cn = r.sitenguon;
+      if (cn && item.theoChiNhanh[cn] !== undefined) {
+        item.theoChiNhanh[cn] += 1;
+      }
+      if (cn && tongTheoChiNhanh[cn] !== undefined) {
+        tongTheoChiNhanh[cn] += 1;
+      }
+    }
+
+    const tongLanMac = result.rows.length;
+
+    const benh = Array.from(benhMap.values())
+      .map((item) => ({
+        maBenh: item.maBenh,
+        tenBenh: item.tenBenh,
+        maICD10: item.maICD10,
+        soLanMac: item.soLanMac,
+        soBenhNhan: item.patients.size,
+        theoChiNhanh: item.theoChiNhanh,
+      }))
+      .sort((a, b) => b.soLanMac - a.soLanMac || a.maBenh.localeCompare(b.maBenh));
 
     res.json({
       thang: targetMonth,
-      tongSoLuot,
-      danhSach: result.rows.map((r) => ({
-        maBenh: r.mabenh,
-        tenBenh: r.tenbenh,
-        maICD10: r.maicd10,
-        soLanMac: r.solanmac,
-      })),
+      tongLanMac,
+      chiNhanh,
+      tongTheoChiNhanh,
+      benh,
     });
   } catch (err) {
     next(err);

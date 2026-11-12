@@ -7,6 +7,7 @@ import visitRoutes from './visitRoutes.js';
 import invoiceRoutes from './invoiceRoutes.js';
 import reportRoutes from './reportRoutes.js';
 import hqRoutes from './hqRoutes.js';
+import analyticsRoutes from './analyticsRoutes.js';
 import { getTongQuan } from '../controllers/reportController.js';
 
 const router = Router();
@@ -33,5 +34,8 @@ router.get('/tong-quan', getTongQuan);
 
 // 7. Headquarters S0 views
 router.use('/hq', hqRoutes);
+
+// 8. MongoDB & Kafka Analytics (Giám sát API & Thống kê Hóa đơn Replica)
+router.use('/analytics', analyticsRoutes);
 
 export default router;

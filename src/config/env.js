@@ -17,4 +17,13 @@ export const env = {
     idleTimeoutMillis: parseInt(process.env.DB_POOL_IDLE_TIMEOUT_MS || '30000', 10),
     connectionTimeoutMillis: parseInt(process.env.DB_POOL_CONN_TIMEOUT_MS || '5000', 10),
   },
+  mongo: {
+    uri: process.env.MONGO_URI || 'mongodb://localhost:27017',
+    dbName: process.env.MONGO_DB_NAME || 'antam_clinic_analytics',
+  },
+  kafka: {
+    brokers: (process.env.KAFKA_BROKERS || 'localhost:9092').split(','),
+    clientId: process.env.KAFKA_CLIENT_ID || 'antam-clinic-backend',
+    groupId: process.env.KAFKA_GROUP_ID || 'antam-analytics-worker',
+  },
 };

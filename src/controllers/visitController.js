@@ -1,5 +1,6 @@
 import { query, withTransaction } from '../config/database.js';
 import { env } from '../config/env.js';
+import { syncInvoiceToMongo } from '../services/invoiceSyncService.js';
 
 // ==========================================
 // 1. DANH SÁCH LƯỢT (GET /api/luot)
@@ -26,6 +27,7 @@ export async function getVisits(req, res, next) {
           pk.lydokham,
           pk.trieuchung,
           pk.ketluankham,
+          pk.maphieugoc,
           NULL::varchar AS macddt,
           NULL::int AS lanthu,
           NULL::text AS ketluansauchua,
@@ -52,6 +54,7 @@ export async function getVisits(req, res, next) {
         JOIN nhan_vien nv ON nv.manv = pk.mabs
         JOIN khoa k ON k.makhoa = nv.makhoa
         LEFT JOIN v_chi_phi_phieu cp ON cp.maphieu = pk.maphieukham
+        WHERE pk.maphieugoc IS NULL
 
         UNION ALL
 
@@ -71,6 +74,7 @@ export async function getVisits(req, res, next) {
           NULL::text AS lydokham,
           NULL::text AS trieuchung,
           NULL::text AS ketluankham,
+          NULL::varchar AS maphieugoc,
           pdt.madot AS macddt,
           pdt.lanthu,
           pdt.ketluansauchua,
@@ -147,6 +151,7 @@ export async function getVisits(req, res, next) {
       lyDoKham: r.lydokham,
       trieuChung: r.trieuchung,
       ketLuanKham: r.ketluankham,
+      maPhieuGoc: r.maphieugoc || null,
       maCDDT: r.macddt,
       lanThu: r.lanthu,
       ketLuanSauChua: r.ketluansauchua,
@@ -180,6 +185,8 @@ export async function getVisitDetail(req, res, next) {
     let dotDieuTri = [];
     let chiPhi = [];
     let luotChua = [];
+    let phieuBoSung = [];
+    let phieuGoc = null;
 
     if (isKham) {
       // 1. Phieu kham base
@@ -187,7 +194,7 @@ export async function getVisitDetail(req, res, next) {
         `SELECT pk.maphieukham AS maluot, pk.thoigian, 'KHAM' AS loailuot,
                 pk.ngayhentaikham, pk.ghichu, nv.makhoa, k.tenkhoa, pk.mabs,
                 nv.hoten AS tenbs, pk.mabn, bn.hoten AS tenbn, pk.lydokham,
-                pk.trieuchung, pk.ketluankham,
+                pk.trieuchung, pk.ketluankham, pk.maphieugoc,
                 COALESCE(cp.tiendichvu, 0) AS tiendichvu,
                 COALESCE(cp.tienthuoc, 0) AS tienthuoc,
                 COALESCE(cp.tienthietbi, 0) AS tienthietbi,
@@ -219,6 +226,7 @@ export async function getVisitDetail(req, res, next) {
         lyDoKham: r.lydokham,
         trieuChung: r.trieuchung,
         ketLuanKham: r.ketluankham,
+        maPhieuGoc: r.maphieugoc || null,
         maCDDT: null,
         lanThu: null,
         ketLuanSauChua: null,
@@ -246,7 +254,7 @@ export async function getVisitDetail(req, res, next) {
       const dotRes = await query(
         `SELECT td.madot, td.maphieukham, td.ngaybatdau, td.mabenh, td.tenbenh,
                 td.mucdo, td.solanchuacanthiet, td.solandachua, td.ngayketthuc, td.trangthai,
-                k.makhoa, k.tenkhoa, pk.mabs, nv.hoten AS tenbs
+                k.makhoa, k.tenkhoa, pk.mabs, nv.hoten AS tenbs, pk.mabn
          FROM v_tien_trinh_dot td
          JOIN phieu_kham pk ON pk.maphieukham = td.maphieukham
          JOIN nhan_vien nv ON nv.manv = pk.mabs
@@ -258,6 +266,7 @@ export async function getVisitDetail(req, res, next) {
       dotDieuTri = dotRes.rows.map((d) => ({
         maCDDT: d.madot,
         maDot: d.madot,
+        maBN: d.mabn,
         maPhieuKham: d.maphieukham,
         ngayBatDau: d.ngaybatdau ? d.ngaybatdau.toISOString().split('T')[0] : null,
         maBenh: d.mabenh,
@@ -333,6 +342,79 @@ export async function getVisitDetail(req, res, next) {
         benh: c.benh,
         tongTien: parseFloat(c.tongtien),
       }));
+
+      // Các phiếu khám bổ sung mở từ phiếu khám này
+      const bsRes = await query(
+        `SELECT pk.maphieukham AS maluot, pk.thoigian, 'KHAM' AS loailuot,
+                pk.ngayhentaikham, pk.ghichu, nv.makhoa, k.tenkhoa, pk.mabs,
+                nv.hoten AS tenbs, pk.mabn, bn.hoten AS tenbn, pk.lydokham,
+                pk.trieuchung, pk.ketluankham, pk.maphieugoc,
+                COALESCE(cp.tongtien, 0) AS tongtien
+         FROM phieu_kham pk
+         JOIN benh_nhan bn ON bn.mabn = pk.mabn
+         JOIN nhan_vien nv ON nv.manv = pk.mabs
+         JOIN khoa k ON k.makhoa = nv.makhoa
+         LEFT JOIN v_chi_phi_phieu cp ON cp.maphieu = pk.maphieukham
+         WHERE pk.maphieugoc = $1
+         ORDER BY pk.thoigian ASC`,
+        [maLuot]
+      );
+      phieuBoSung = bsRes.rows.map((b) => ({
+        maLuot: b.maluot,
+        thoiGian: b.thoigian.toISOString(),
+        loaiLuot: 'KHAM',
+        ngayHenTaiKham: b.ngayhentaikham ? b.ngayhentaikham.toISOString().split('T')[0] : null,
+        ghiChu: b.ghichu,
+        maKhoa: b.makhoa,
+        tenKhoa: b.tenkhoa,
+        maBS: b.mabs,
+        tenBS: b.tenbs,
+        maBN: b.mabn,
+        tenBN: b.tenbn,
+        lyDoKham: b.lydokham,
+        trieuChung: b.trieuchung,
+        ketLuanKham: b.ketluankham,
+        maPhieuGoc: b.maphieugoc,
+        tongTien: parseFloat(b.tongtien),
+      }));
+
+      // Nếu đây là phiếu khám bổ sung, lấy thông tin phiếu gốc
+      if (r.maphieugoc) {
+        const pgRes = await query(
+          `SELECT pk.maphieukham AS maluot, pk.thoigian, 'KHAM' AS loailuot,
+                  pk.ngayhentaikham, pk.ghichu, nv.makhoa, k.tenkhoa, pk.mabs,
+                  nv.hoten AS tenbs, pk.mabn, bn.hoten AS tenbn, pk.lydokham,
+                  pk.trieuchung, pk.ketluankham,
+                  COALESCE(cp.tongtien, 0) AS tongtien
+           FROM phieu_kham pk
+           JOIN benh_nhan bn ON bn.mabn = pk.mabn
+           JOIN nhan_vien nv ON nv.manv = pk.mabs
+           JOIN khoa k ON k.makhoa = nv.makhoa
+           LEFT JOIN v_chi_phi_phieu cp ON cp.maphieu = pk.maphieukham
+           WHERE pk.maphieukham = $1`,
+          [r.maphieugoc]
+        );
+        if (pgRes.rows.length > 0) {
+          const pg = pgRes.rows[0];
+          phieuGoc = {
+            maLuot: pg.maluot,
+            thoiGian: pg.thoigian.toISOString(),
+            loaiLuot: 'KHAM',
+            ngayHenTaiKham: pg.ngayhentaikham ? pg.ngayhentaikham.toISOString().split('T')[0] : null,
+            ghiChu: pg.ghichu,
+            maKhoa: pg.makhoa,
+            tenKhoa: pg.tenkhoa,
+            maBS: pg.mabs,
+            tenBS: pg.tenbs,
+            maBN: pg.mabn,
+            tenBN: pg.tenbn,
+            lyDoKham: pg.lydokham,
+            trieuChung: pg.trieuchung,
+            ketLuanKham: pg.ketluankham,
+            tongTien: parseFloat(pg.tongtien),
+          };
+        }
+      }
     } else {
       // 2. Phieu dieu tri base
       const pdtRes = await query(
@@ -406,7 +488,7 @@ export async function getVisitDetail(req, res, next) {
       const dotRes = await query(
         `SELECT td.madot, td.maphieukham, td.ngaybatdau, td.mabenh, td.tenbenh,
                 td.mucdo, td.solanchuacanthiet, td.solandachua, td.ngayketthuc, td.trangthai,
-                k.makhoa, k.tenkhoa, pk.mabs, nv.hoten AS tenbs
+                k.makhoa, k.tenkhoa, pk.mabs, nv.hoten AS tenbs, pk.mabn
          FROM v_tien_trinh_dot td
          JOIN phieu_kham pk ON pk.maphieukham = td.maphieukham
          JOIN nhan_vien nv ON nv.manv = pk.mabs
@@ -417,6 +499,7 @@ export async function getVisitDetail(req, res, next) {
       dotDieuTri = dotRes.rows.map((d) => ({
         maCDDT: d.madot,
         maDot: d.madot,
+        maBN: d.mabn,
         maPhieuKham: d.maphieukham,
         ngayBatDau: d.ngaybatdau ? d.ngaybatdau.toISOString().split('T')[0] : null,
         maBenh: d.mabenh,
@@ -489,6 +572,8 @@ export async function getVisitDetail(req, res, next) {
       luotChua,
       suaDuoc: true,
       lyDoKhongSua: null,
+      phieuBoSung,
+      phieuGoc,
     });
   } catch (err) {
     next(err);
@@ -500,9 +585,11 @@ export async function getVisitDetail(req, res, next) {
 // ==========================================
 export async function createLuotKham(req, res, next) {
   try {
+    // Theo quy định của hệ thống: Phiếu khám (PHIEU_KHAM) chỉ có dịch vụ khám/CLS (DV_KHAM)
+    // và đơn thuốc (KE_DON), KHÔNG sử dụng thiết bị y tế (thiết bị chỉ dùng cho phiếu điều trị - SU_DUNG_TB).
     const {
-      maBN, maKhoa, maBS, thoiGian, lyDoKham, trieuChung, ghiChu,
-      chanDoan = [], yTa = [], dichVu = [], thuoc = [], thietBi = []
+      maBN, maKhoa, maBS, thoiGian, lyDoKham, trieuChung, ghiChu, maPhieuGoc,
+      chanDoan = [], yTa = [], dichVu = [], thuoc = []
     } = req.body;
 
     const result = await withTransaction(async (client) => {
@@ -521,6 +608,32 @@ export async function createLuotKham(req, res, next) {
       const actualKhoa = bsRes.rows[0].makhoa;
       const branchCode = bsRes.rows[0].macn; // CN1, CN2, CN3
 
+      // 1.1. Kiểm tra phiếu gốc nếu là khám bổ sung (C20)
+      let validMaPhieuGoc = null;
+      let tgDate = thoiGian ? new Date(thoiGian) : new Date();
+
+      if (maPhieuGoc) {
+        const pgCheck = await client.query(
+          'SELECT maphieukham, mabn, thoigian, maphieugoc FROM phieu_kham WHERE maphieukham = $1',
+          [maPhieuGoc]
+        );
+        if (pgCheck.rows.length === 0) {
+          throw new Error(`Phiếu khám gốc "${maPhieuGoc}" không tồn tại (C20).`);
+        }
+        const pg = pgCheck.rows[0];
+        if (pg.mabn !== maBN) {
+          throw new Error(`Phiếu khám bổ sung phải cùng bệnh nhân (${pg.mabn}) với phiếu gốc (C20).`);
+        }
+        if (pg.maphieugoc) {
+          throw new Error(`Phiếu gốc "${maPhieuGoc}" không được là một phiếu khám bổ sung khác (C20).`);
+        }
+        const tgGoc = new Date(pg.thoigian);
+        if (tgDate <= tgGoc) {
+          tgDate = new Date(tgGoc.getTime() + 60000); // Đảm bảo thời gian sau phiếu gốc
+        }
+        validMaPhieuGoc = pg.maphieukham;
+      }
+
       // 2. Bắt buộc có dịch vụ loại 'Khám bệnh' (C8)
       let services = [...dichVu];
       const dvCheck = await client.query(
@@ -537,13 +650,12 @@ export async function createLuotKham(req, res, next) {
           services.unshift({
             maDV: defaultKham.rows[0].madv,
             soLuong: 1,
-            ketQua: 'Khám thông thường',
+            ketQua: validMaPhieuGoc ? 'Khám bổ sung' : 'Khám thông thường',
           });
         }
       }
 
       // 3. Sinh mã phiếu khám: K-MaKhoa-MaBS-yyMMdd-NNN (BR5, C6)
-      const tgDate = thoiGian ? new Date(thoiGian) : new Date();
       const yy = String(tgDate.getFullYear()).slice(-2);
       const mm = String(tgDate.getMonth() + 1).padStart(2, '0');
       const dd = String(tgDate.getDate()).padStart(2, '0');
@@ -558,16 +670,20 @@ export async function createLuotKham(req, res, next) {
       const seq = String(seqRes.rows[0].count + 1).padStart(3, '0');
       const maPhieuKham = `K-${actualKhoa}-${maBS}-${datePrefix}-${seq}`;
 
-      // 4. INSERT PHIEU_KHAM
+      // 4. INSERT PHIEU_KHAM (kèm MaPhieuGoc nếu có)
       await client.query(
-        `INSERT INTO phieu_kham (maphieukham, thoigian, lydokham, trieuchung, ketluankham, ghichu, mabn, mabs)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [maPhieuKham, tgDate, lyDoKham || null, trieuChung || null, null, ghiChu || null, maBN, maBS]
+        `INSERT INTO phieu_kham (maphieukham, thoigian, lydokham, trieuchung, ketluankham, ghichu, mabn, mabs, maphieugoc)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+        [maPhieuKham, tgDate, lyDoKham || null, trieuChung || null, null, ghiChu || null, maBN, maBS, validMaPhieuGoc]
       );
 
-      // 5. INSERT HO_TRO_KHAM
+      // 5. INSERT HO_TRO_KHAM (C2: Bác sĩ và y tá phải cùng khoa)
       for (const yt of yTa) {
         if (yt.maYT) {
+          const ytRes = await client.query('SELECT makhoa FROM nhan_vien WHERE manv = $1', [yt.maYT]);
+          if (ytRes.rows.length > 0 && ytRes.rows[0].makhoa !== actualKhoa) {
+            throw new Error(`C2: Y tá ${yt.maYT} (khoa ${ytRes.rows[0].makhoa}) không cùng khoa với bác sĩ ${maBS} (khoa ${actualKhoa}).`);
+          }
           await client.query(
             `INSERT INTO ho_tro_kham (mayt, maphieukham, vaitro) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
             [yt.maYT, maPhieuKham, yt.vaiTro || 'Trợ khám']
@@ -649,15 +765,21 @@ export async function createLuotKham(req, res, next) {
 
       return {
         maLuot: maPhieuKham,
+        maHD,
         loaiLuot: 'KHAM',
         maBN,
         tenBN,
+        maPhieuGoc: validMaPhieuGoc,
         maCDDT: createdDots,
         lanThu: null,
         tongTien,
         canhBao: [],
       };
     });
+
+    if (result.maHD) {
+      syncInvoiceToMongo(result.maHD);
+    }
 
     res.json(result);
   } catch (err) {
@@ -743,7 +865,7 @@ export async function addDiagnosis(req, res, next) {
 export async function createLuotChua(req, res, next) {
   try {
     const {
-      maCDDT, thoiGian, hinhThuc = [], ghiChu,
+      maCDDT, maKhoa, maBS, thoiGian, hinhThuc = [], ghiChu,
       yTa = [], dichVu = [], thuoc = [], thietBi = []
     } = req.body;
 
@@ -769,20 +891,46 @@ export async function createLuotChua(req, res, next) {
       }
 
       const branchCode = dot.macn;
-      const makhoa = dot.makhoa;
 
-      // 2. Tìm bác sĩ thực hiện (phải cùng khoa với bác sĩ mở đợt - C2, BR2)
-      const bsRes = await client.query(
-        `SELECT bs.manv FROM bac_si bs
-         JOIN nhan_vien nv ON nv.manv = bs.manv
-         WHERE nv.makhoa = $1 AND nv.trangthai = 'Đang làm việc'
-         ORDER BY (bs.manv = $2) DESC, bs.manv ASC LIMIT 1`,
-        [makhoa, dot.mabs_kham]
-      );
-      if (bsRes.rows.length === 0) {
-        throw new Error(`Không tìm thấy bác sĩ đang làm việc thuộc khoa ${makhoa} để thực hiện điều trị.`);
+      // 2. Tìm bác sĩ thực hiện & khoa (cho phép chọn bác sĩ trong cùng chi nhánh)
+      let mabs_chua = null;
+      let actualKhoa = null;
+
+      if (maBS) {
+        const bsRes = await client.query(
+          `SELECT bs.manv, nv.makhoa, nv.trangthai, k.macn
+           FROM bac_si bs
+           JOIN nhan_vien nv ON nv.manv = bs.manv
+           JOIN khoa k ON k.makhoa = nv.makhoa
+           WHERE bs.manv = $1`,
+          [maBS]
+        );
+        if (bsRes.rows.length === 0) {
+          throw new Error(`Bác sĩ ${maBS} không tồn tại.`);
+        }
+        if (bsRes.rows[0].trangthai !== 'Đang làm việc') {
+          throw new Error(`Bác sĩ ${maBS} không ở trạng thái 'Đang làm việc'.`);
+        }
+        if (bsRes.rows[0].macn !== branchCode) {
+          throw new Error(`Bác sĩ ${maBS} không thuộc chi nhánh này (${branchCode}).`);
+        }
+        mabs_chua = bsRes.rows[0].manv;
+        actualKhoa = bsRes.rows[0].makhoa;
+      } else {
+        const targetKhoa = maKhoa || dot.makhoa;
+        const bsRes = await client.query(
+          `SELECT bs.manv, nv.makhoa FROM bac_si bs
+           JOIN nhan_vien nv ON nv.manv = bs.manv
+           WHERE nv.makhoa = $1 AND nv.trangthai = 'Đang làm việc'
+           ORDER BY (bs.manv = $2) DESC, bs.manv ASC LIMIT 1`,
+          [targetKhoa, dot.mabs_kham]
+        );
+        if (bsRes.rows.length === 0) {
+          throw new Error(`Không tìm thấy bác sĩ đang làm việc thuộc khoa ${targetKhoa} để thực hiện điều trị.`);
+        }
+        mabs_chua = bsRes.rows[0].manv;
+        actualKhoa = bsRes.rows[0].makhoa;
       }
-      const mabs_chua = bsRes.rows[0].manv;
 
       // 3. Tính LanThu (C10): tăng liên tiếp từ 1
       const lanRes = await client.query(
@@ -805,7 +953,7 @@ export async function createLuotChua(req, res, next) {
         [mabs_chua, tgDate.toISOString().split('T')[0]]
       );
       const seq = String(seqRes.rows[0].count + 1).padStart(3, '0');
-      const maPhieuDT = `C-${makhoa}-${mabs_chua}-${datePrefix}-${seq}`;
+      const maPhieuDT = `C-${actualKhoa}-${mabs_chua}-${datePrefix}-${seq}`;
 
       // 5. INSERT PHIEU_DIEU_TRI
       await client.query(
@@ -823,9 +971,13 @@ export async function createLuotChua(req, res, next) {
         );
       }
 
-      // 7. INSERT HO_TRO_CHUA
+      // 7. INSERT HO_TRO_CHUA (C2: Bác sĩ và y tá phải cùng khoa)
       for (const yt of yTa) {
         if (yt.maYT) {
+          const ytRes = await client.query('SELECT makhoa FROM nhan_vien WHERE manv = $1', [yt.maYT]);
+          if (ytRes.rows.length > 0 && ytRes.rows[0].makhoa !== actualKhoa) {
+            throw new Error(`C2: Y tá ${yt.maYT} (khoa ${ytRes.rows[0].makhoa}) không cùng khoa với bác sĩ ${mabs_chua} (khoa ${actualKhoa}).`);
+          }
           await client.query(
             `INSERT INTO ho_tro_chua (mayt, maphieudt, vaitro) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
             [yt.maYT, maPhieuDT, yt.vaiTro || 'Trợ chữa']
@@ -905,6 +1057,7 @@ export async function createLuotChua(req, res, next) {
 
       return {
         maLuot: maPhieuDT,
+        maHD,
         loaiLuot: 'CHUA',
         maBN: dot.mabn,
         tenBN,
@@ -914,6 +1067,10 @@ export async function createLuotChua(req, res, next) {
         canhBao: [],
       };
     });
+
+    if (result.maHD) {
+      syncInvoiceToMongo(result.maHD);
+    }
 
     res.json(result);
   } catch (err) {
@@ -1043,6 +1200,54 @@ export async function deleteVisit(req, res, next) {
     });
 
     res.json({ mode: 'HARD', message: `Đã xóa lượt ${maLuot} thành công` });
+  } catch (err) {
+    next(err);
+  }
+}
+
+// ==========================================
+// 10. DANH SÁCH PHIẾU KHÁM GỐC CỦA BỆNH NHÂN (GET /api/benh-nhan/:maBN/phieu-kham-goc)
+// ==========================================
+export async function getPhieuKhamGoc(req, res, next) {
+  try {
+    const maBN = req.params.maBN || req.query.maBN;
+    if (!maBN) {
+      return res.json([]);
+    }
+    const result = await query(
+      `SELECT pk.maphieukham AS maluot, pk.thoigian, pk.mabs, nv.hoten AS tenbs,
+              nv.makhoa, k.tenkhoa, pk.lydokham, pk.trieuchung, pk.ketluankham,
+              (
+                SELECT string_agg(b.tenbenh, ', ')
+                FROM dot_dieu_tri d
+                JOIN benh b ON b.mabenh = d.mabenh
+                WHERE d.maphieukham = pk.maphieukham
+              ) AS benh,
+              COALESCE(cp.tongtien, 0) AS tongtien
+       FROM phieu_kham pk
+       JOIN nhan_vien nv ON nv.manv = pk.mabs
+       JOIN khoa k ON k.makhoa = nv.makhoa
+       LEFT JOIN v_chi_phi_phieu cp ON cp.maphieu = pk.maphieukham
+       WHERE pk.mabn = $1 AND pk.maphieugoc IS NULL
+       ORDER BY pk.thoigian DESC`,
+      [maBN]
+    );
+
+    res.json(
+      result.rows.map((r) => ({
+        maLuot: r.maluot,
+        thoiGian: r.thoigian.toISOString(),
+        maBS: r.mabs,
+        tenBS: r.tenbs,
+        maKhoa: r.makhoa,
+        tenKhoa: r.tenkhoa,
+        lyDoKham: r.lydokham,
+        trieuChung: r.trieuchung,
+        ketLuanKham: r.ketluankham,
+        benh: r.benh,
+        tongTien: parseFloat(r.tongtien),
+      }))
+    );
   } catch (err) {
     next(err);
   }

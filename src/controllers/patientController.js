@@ -238,7 +238,7 @@ export async function getPatientMedicalRecord(req, res, next) {
     const pkRes = await query(
       `SELECT pk.maphieukham AS maluot, pk.thoigian, 'KHAM' AS loailuot,
               nv.makhoa, k.tenkhoa, k.macn, pk.mabs, nv.hoten AS tenbs,
-              pk.ngayhentaikham, pk.ghichu, pk.lydokham, pk.trieuchung, pk.ketluankham,
+              pk.ngayhentaikham, pk.ghichu, pk.lydokham, pk.trieuchung, pk.ketluankham, pk.maphieugoc,
               NULL::varchar AS macddt, NULL::int AS lanthu, NULL::text AS ketluansauchua, NULL::varchar AS tinhtrangsauchua,
               (
                 SELECT string_agg(b.tenbenh, ', ' ORDER BY b.tenbenh)
@@ -269,7 +269,7 @@ export async function getPatientMedicalRecord(req, res, next) {
     const pdtRes = await query(
       `SELECT pdt.maphieudt AS maluot, pdt.thoigian, 'CHUA' AS loailuot,
               nv.makhoa, k.tenkhoa, k.macn, pdt.mabs, nv.hoten AS tenbs,
-              pdt.ngayhentaikham, pdt.ghichu, NULL::varchar AS lydokham, NULL::text AS trieuchung, NULL::text AS ketluankham,
+              pdt.ngayhentaikham, pdt.ghichu, NULL::varchar AS lydokham, NULL::text AS trieuchung, NULL::text AS ketluankham, NULL::varchar AS maphieugoc,
               pdt.madot AS macddt, pdt.lanthu, pdt.ketluansauchua, pdt.tinhtrangsauchua,
               b.tenbenh AS benh,
               (
@@ -342,6 +342,7 @@ export async function getPatientMedicalRecord(req, res, next) {
       lyDoKham: r.lydokham,
       trieuChung: r.trieuchung,
       ketLuanKham: r.ketluankham,
+      maPhieuGoc: r.maphieugoc || null,
       maCDDT: r.macddt,
       lanThu: r.lanthu,
       ketLuanSauChua: r.ketluansauchua,

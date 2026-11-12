@@ -7,6 +7,9 @@ import { env } from '../config/env.js';
 export function errorHandler(err, req, res, next) {
   const site = req.site || env.siteCode;
 
+  // Attach error to res.locals for apiLogger
+  res.locals.error = err;
+
   // PostgreSQL Error Codes mapping
   if (err.code) {
     switch (err.code) {

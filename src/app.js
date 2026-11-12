@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import routes from './routes/index.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 import { notFound } from './middlewares/notFound.js';
+import { apiLogger } from './middlewares/apiLogger.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +27,9 @@ app.use(cors({
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Common API Logger: Asynchronously records API metrics and errors to Kafka -> MongoDB
+app.use(apiLogger);
 
 // Serve static frontend build if present
 app.use(express.static(publicDir));
